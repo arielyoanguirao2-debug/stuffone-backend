@@ -3,84 +3,180 @@ const cors = require("cors");
 
 const app = express();
 
-// --- CONFIGURATION ---
+// =====================
+// CONFIGURATION
+// =====================
 app.use(cors());
-// CRUCIAL : Permet au serveur de lire le JSON envoyé dans le corps (body) des requêtes
-app.use(express.json({ limit: '10mb' })); 
+app.use(express.json({ limit: "10mb" }));
 
-// Simulation d'une base de données en mémoire
+// =====================
+// "BASE DE DONNÉES" MÉMOIRE
+// =====================
 let structures = [
   {
     id: "test-1",
     title: "Structure Test",
     category: "Landing",
-    html: "<html><body><h1>Structure par défaut</h1></body></html>"
+    html: "<html><body><h1>Structure par défaut</h1></body></html>",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   }
 ];
 
-// --- ROUTES ---
+// =====================
+// UTILITAIRES
+// =====================
+function generateId() {
+  return `id-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
 
-// 1. Route de santé (Health Check)
+function findIndexById(id) {
+  return structures.findIndex(s => s.id === id);
+}
+
+// =====================
+// VALIDATION
+// =====================
+function validateStructure(data) {
+  if (!data.title || typeof data.title !== "string") {
+    return "title invalide";
+  }
+  if (!data.html || typeof data.html !== "string") {
+    return "html invalide";
+  }
+  return null;
+}
+
+// =====================
+// ROUTES - CORE
+// =====================
+
+// Health check
 app.get("/", (req, res) => {
-  res.status(200).send("Serveur WebVault Backend opérationnel.");
+  res.status(200).send("🚀 WebVault API opérationnel");
 });
 
-// 2. Récupérer toutes les structures (GET)
+// GET all
 app.get("/api/structures", (req, res) => {
-  try {
-    res.json(structures);
-  } catch (error) {
-    res.status(500).json({ error: "Erreur lors de la récupération des structures" });
-  }
+  res.json(structures);
 });
 
-// 3. LA ROUTE MANQUANTE : Recevoir et ajouter une structure (POST)
+// GET by ID
+app.get("/api/structures/:id", (req, res) => {
+  const item = structures.find(s => s.id === req.params.id);
+
+  if (!item) {
+    return res.status(404).json({ error: "Structure introuvable" });
+  }
+
+  res.json(item);
+});
+
+// CREATE
 app.post("/upload", (req, res) => {
-  try {
-    const { title, category, html } = req.body;
-
-    // Validation minimaliste
-    if (!title || !html) {
-      return res.status(400).json({ 
-        error: "Données incomplètes. 'title' et 'html' sont requis." 
-      });
-    }
-
-    // Création d'un nouvel objet structure
-    const newStructure = {
-      id: `id-${Date.now()}`, // Génère un ID unique basé sur le temps
-      title,
-      category: category || "Non classé",
-      html
-    };
-
-    // Ajout à notre "base de données" (en haut de la liste)
-    structures.unshift(newStructure);
-
-    console.log(`[LOG] Nouvelle structure reçue : ${title}`);
-
-    res.status(201).json({
-      message: "Structure ajoutée avec succès !",
-      data: newStructure
-    });
-
-  } catch (error) {
-    console.error("Erreur Upload:", error);
-    res.status(500).json({ error: "Erreur interne du serveur lors de l'upload" });
+  const error = validateStructure(req.body);
+  if (error) {
+    return res.status(400).json({ error });
   }
+
+  const { title, category, html } = req.body;
+
+  const newStructure = {
+    id: generateId(),
+    title,
+    category: category || "Non classé",
+    html,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  structures.unshift(newStructure);
+
+  console.log(`[UPLOAD] ${title}`);
+
+  res.status(201).json({
+    message: "Structure créée avec succès",
+    data: newStructure
+  });
 });
 
-// Gestion des routes non trouvées (404)
+// UPDATE
+app.put("/api/structures/:id", (req, res) => {
+  const index = findIndexById(req.params.id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "Structure introuvable" });
+  }
+
+  const error = validateStructure(req.body);
+  if (error) {
+    return res.status(400).json({ error });
+  }
+
+  structures[index] = {
+    ...structures[index],
+    ...req.body,
+    updatedAt: new Date().toISOString()
+  };
+
+  res.json({
+    message: "Structure mise à jour",
+    data: structures[index]
+  });
+});
+
+// DELETE
+app.delete("/api/structures/:id", (req, res) => {
+  const index = findIndexById(req.params.id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "Structure introuvable" });
+  }
+
+  const deleted = structures.splice(index, 1);
+
+  res.json({
+    message: "Structure supprimée",
+    data: deleted[0]
+  });
+});
+
+// SEARCH (utile pour ton bot scraping)
+app.get("/api/search", (req, res) => {
+  const q = (req.query.q || "").toLowerCase();
+
+  const results = structures.filter(s =>
+    s.title.toLowerCase().includes(q) ||
+    s.category.toLowerCase().includes(q)
+  );
+
+  res.json({
+    query: q,
+    count: results.length,
+    results
+  });
+});
+
+// =====================
+// 404
+// =====================
 app.use((req, res) => {
-  res.status(404).json({ error: "Route non trouvée sur ce backend" });
+  res.status(404).json({ error: "Route non trouvée" });
 });
 
-// --- LANCEMENT ---
+// =====================
+// START
+// =====================
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-  console.log(`-----------------------------------------`);
-  console.log(`🚀 Serveur WebVault lancé sur le port ${PORT}`);
-  console.log(`➡️  Route GET : /api/structures`);
-  console.log(`➡️  Route POST : /upload`);
-  console.log(`-----------------------------------------`);
+  console.log("----------------------------------");
+  console.log("🚀 WebVault Backend lancé");
+  console.log("➡ GET    /api/structures");
+  console.log("➡ GET    /api/structures/:id");
+  console.log("➡ POST   /upload");
+  console.log("➡ PUT    /api/structures/:id");
+  console.log("➡ DELETE /api/structures/:id");
+  console.log("➡ GET    /api/search?q=");
+  console.log("----------------------------------");
 });
