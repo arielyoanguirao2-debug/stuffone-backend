@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const mongoose = require("mongoose");
+const fs = require("fs");
 
 const app = express();
 
@@ -12,38 +12,60 @@ app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 3000;
 
-// ENV
+// API KEY (Render env recommandé)
 const API_KEY = process.env.STUFFONE_API_KEY;
-const MONGO_URI = process.env.MONGO_URI;
 
 // =====================
-// MONGODB CONNECT
+// DB FILE
 // =====================
-mongoose.connect(MONGO_URI)
-  .then(() => console.log("🟢 MongoDB connecté"))
-  .catch(err => console.error("🔴 MongoDB error:", err));
-
-mongoose.connection.on("error", err => {
-  console.error("Mongo runtime error:", err);
-});
+const DB_FILE = "./db.json";
+const DB_BACKUP = "./db.backup.json";
 
 // =====================
-// MODEL
+// LOAD DB
 // =====================
-const StructureSchema = new mongoose.Schema({
-  title: String,
-  category: String,
-  html: String,
-  css: String,
-  url: String,
-  hash: String,
-  depth: Number
-}, { timestamps: true });
-
-const Structure = mongoose.model("Structure", StructureSchema);
+function loadDB() {
+  try {
+    const data = fs.readFileSync(DB_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch (err) {
+    console.log("⚠️ DB vide ou corrompue, reset automatique");
+    return [];
+  }
+}
 
 // =====================
-// SECURITY MIDDLEWARE
+// SAFE SAVE DB (anti corruption)
+// =====================
+function saveDB(data) {
+  try {
+    // backup avant écriture
+    fs.writeFileSync(DB_BACKUP, JSON.stringify(data, null, 2));
+
+    // write final
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+
+  } catch (err) {
+    console.error("❌ Erreur sauvegarde DB:", err);
+  }
+}
+
+// memory cache
+let structures = loadDB();
+
+// =====================
+// UTILS
+// =====================
+function generateId() {
+  return `id-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function normalize(str) {
+  return (str || "").toLowerCase();
+}
+
+// =====================
+// AUTH MIDDLEWARE
 // =====================
 function checkApiKey(req, res, next) {
   const key = req.headers["x-api-key"];
@@ -56,23 +78,31 @@ function checkApiKey(req, res, next) {
 }
 
 // =====================
+// VALIDATION
+// =====================
+function validate(data) {
+  if (!data.title || typeof data.title !== "string") return "title invalide";
+  if (!data.html || typeof data.html !== "string") return "html invalide";
+  return null;
+}
+
+// =====================
 // ROUTES
 // =====================
 
 // HEALTH
 app.get("/", (req, res) => {
-  res.send("🚀 StuffOne API OK (MongoDB)");
+  res.send("🚀 StuffOne JSON Backend OK");
 });
 
 // GET ALL
-app.get("/api/structures", async (req, res) => {
-  const data = await Structure.find().sort({ createdAt: -1 });
-  res.json(data);
+app.get("/api/structures", (req, res) => {
+  res.json(structures);
 });
 
 // GET ONE
-app.get("/api/structures/:id", async (req, res) => {
-  const item = await Structure.findById(req.params.id);
+app.get("/api/structures/:id", (req, res) => {
+  const item = structures.find(s => s.id === req.params.id);
 
   if (!item) {
     return res.status(404).json({ error: "Introuvable" });
@@ -82,51 +112,47 @@ app.get("/api/structures/:id", async (req, res) => {
 });
 
 // =====================
-// UPLOAD (BOT)
+// CREATE (BOT)
 // =====================
-app.post("/upload", checkApiKey, async (req, res) => {
+app.post("/upload", checkApiKey, (req, res) => {
 
-  const {
-    title,
-    category,
-    html,
-    css,
-    url,
-    hash,
-    depth
-  } = req.body;
+  const error = validate(req.body);
+  if (error) return res.status(400).json({ error });
 
-  if (!title || !html) {
-    return res.status(400).json({ error: "Données invalides" });
-  }
+  const { title, category, html, css, url, hash, depth } = req.body;
 
-  // DUPLICATE CHECK
+  // duplicate check
   if (hash) {
-    const exists = await Structure.findOne({ hash });
-
+    const exists = structures.find(s => s.hash === hash);
     if (exists) {
       return res.json({
         message: "Déjà existant",
         duplicate: true,
-        id: exists._id
+        id: exists.id
       });
     }
   }
 
-  const newStructure = await Structure.create({
+  const newStructure = {
+    id: generateId(),
     title,
     category: category || "unknown",
     html,
     css: css || "",
     url: url || "",
     hash: hash || "",
-    depth: depth || 0
-  });
+    depth: depth || 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  structures.unshift(newStructure);
+  saveDB(structures);
 
   console.log(`[UPLOAD] ${title}`);
 
   res.status(201).json({
-    message: "Structure enregistrée",
+    message: "Structure ajoutée",
     data: newStructure
   });
 });
@@ -134,51 +160,61 @@ app.post("/upload", checkApiKey, async (req, res) => {
 // =====================
 // UPDATE
 // =====================
-app.put("/api/structures/:id", async (req, res) => {
+app.put("/api/structures/:id", (req, res) => {
 
-  const updated = await Structure.findByIdAndUpdate(
-    req.params.id,
-    { ...req.body },
-    { new: true }
-  );
+  const index = structures.findIndex(s => s.id === req.params.id);
 
-  if (!updated) {
+  if (index === -1) {
     return res.status(404).json({ error: "Introuvable" });
   }
 
+  structures[index] = {
+    ...structures[index],
+    ...req.body,
+    updatedAt: new Date().toISOString()
+  };
+
+  saveDB(structures);
+
   res.json({
     message: "Mis à jour",
-    data: updated
+    data: structures[index]
   });
 });
 
 // =====================
 // DELETE ONE
 // =====================
-app.delete("/api/structures/:id", async (req, res) => {
+app.delete("/api/structures/:id", (req, res) => {
 
-  const deleted = await Structure.findByIdAndDelete(req.params.id);
+  const index = structures.findIndex(s => s.id === req.params.id);
 
-  if (!deleted) {
+  if (index === -1) {
     return res.status(404).json({ error: "Introuvable" });
   }
 
+  const deleted = structures.splice(index, 1);
+
+  saveDB(structures);
+
   res.json({
     message: "Supprimé",
-    data: deleted
+    data: deleted[0]
   });
 });
 
 // =====================
-// DELETE ALL (ADMIN)
+// RESET ALL
 // =====================
-app.delete("/api/admin/reset", async (req, res) => {
+app.delete("/api/admin/reset", (req, res) => {
 
-  const count = await Structure.countDocuments();
-  await Structure.deleteMany({});
+  const count = structures.length;
+
+  structures = [];
+  saveDB(structures);
 
   res.json({
-    message: "RESET COMPLET",
+    message: "RESET OK",
     deletedCount: count
   });
 });
@@ -186,16 +222,14 @@ app.delete("/api/admin/reset", async (req, res) => {
 // =====================
 // SEARCH
 // =====================
-app.get("/api/search", async (req, res) => {
+app.get("/api/search", (req, res) => {
 
-  const q = req.query.q || "";
+  const q = normalize(req.query.q);
 
-  const results = await Structure.find({
-    $or: [
-      { title: { $regex: q, $options: "i" } },
-      { category: { $regex: q, $options: "i" } }
-    ]
-  });
+  const results = structures.filter(s =>
+    normalize(s.title).includes(q) ||
+    normalize(s.category).includes(q)
+  );
 
   res.json({
     query: q,
@@ -216,8 +250,14 @@ app.use((req, res) => {
 // =====================
 app.listen(PORT, () => {
   console.log("================================");
-  console.log("🚀 StuffOne Backend Live");
+  console.log("🚀 StuffOne JSON Backend");
   console.log("================================");
-  console.log("MongoDB + API KEY + Bot Ready");
+  console.log("POST   /upload (API KEY)");
+  console.log("GET    /api/structures");
+  console.log("GET    /api/structures/:id");
+  console.log("PUT    /api/structures/:id");
+  console.log("DELETE /api/structures/:id");
+  console.log("DELETE /api/admin/reset");
+  console.log("GET    /api/search?q=");
   console.log("================================");
 });
