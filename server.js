@@ -11,15 +11,10 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.STUFFONE_API_KEY;
-
-// =====================
-// DB FILE
-// =====================
 const DB_FILE = "./db.json";
 
 // =====================
-// LOAD DB
+// DB LOAD
 // =====================
 function loadDB() {
   try {
@@ -31,45 +26,32 @@ function loadDB() {
 }
 
 // =====================
-// SAVE DB
+// DB SAVE
 // =====================
 function saveDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-// memory
+// mémoire
 let structures = loadDB();
 
 // =====================
-// UTILS
+// UTIL
 // =====================
 function generateId() {
   return `id-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
 
 // =====================
-// API KEY (UPLOAD ONLY)
-// =====================
-function checkApiKey(req, res, next) {
-  const key = req.headers["x-api-key"];
-
-  if (!key || key !== API_KEY) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  next();
-}
-
-// =====================
 // ROUTES
 // =====================
 
-// HEALTH CHECK
+// TEST SERVER
 app.get("/", (req, res) => {
-  res.send("🚀 Backend OK - StuffOne JSON");
+  res.send("Backend OK");
 });
 
-// GET ALL
+// GET ALL (frontend call)
 app.get("/api/structures", (req, res) => {
   res.json(structures);
 });
@@ -85,26 +67,12 @@ app.get("/api/structures/:id", (req, res) => {
   res.json(item);
 });
 
-// CREATE (BOT UPLOAD)
-app.post("/upload", checkApiKey, (req, res) => {
-
-  const { title, category, html, css, url, hash } = req.body;
+// CREATE (frontend or bot)
+app.post("/api/structures", (req, res) => {
+  const { title, category, html, css, url } = req.body;
 
   if (!title || !html) {
-    return res.status(400).json({ error: "Invalid data" });
-  }
-
-  // anti duplicate
-  if (hash) {
-    const exists = structures.find(s => s.hash === hash);
-
-    if (exists) {
-      return res.json({
-        message: "Already exists",
-        duplicate: true,
-        id: exists.id
-      });
-    }
+    return res.status(400).json({ error: "Missing data" });
   }
 
   const newItem = {
@@ -114,24 +82,17 @@ app.post("/upload", checkApiKey, (req, res) => {
     html,
     css: css || "",
     url: url || "",
-    hash: hash || "",
     createdAt: new Date().toISOString()
   };
 
   structures.unshift(newItem);
   saveDB(structures);
 
-  console.log("[UPLOAD]", title);
-
-  res.status(201).json({
-    message: "Saved",
-    data: newItem
-  });
+  res.status(201).json(newItem);
 });
 
 // UPDATE
 app.put("/api/structures/:id", (req, res) => {
-
   const index = structures.findIndex(s => s.id === req.params.id);
 
   if (index === -1) {
@@ -140,20 +101,17 @@ app.put("/api/structures/:id", (req, res) => {
 
   structures[index] = {
     ...structures[index],
-    ...req.body
+    ...req.body,
+    updatedAt: new Date().toISOString()
   };
 
   saveDB(structures);
 
-  res.json({
-    message: "Updated",
-    data: structures[index]
-  });
+  res.json(structures[index]);
 });
 
-// DELETE ONE
+// DELETE
 app.delete("/api/structures/:id", (req, res) => {
-
   const index = structures.findIndex(s => s.id === req.params.id);
 
   if (index === -1) {
@@ -164,29 +122,11 @@ app.delete("/api/structures/:id", (req, res) => {
 
   saveDB(structures);
 
-  res.json({
-    message: "Deleted",
-    data: deleted[0]
-  });
-});
-
-// RESET ALL
-app.delete("/api/admin/reset", (req, res) => {
-
-  const count = structures.length;
-  structures = [];
-
-  saveDB(structures);
-
-  res.json({
-    message: "Reset done",
-    deletedCount: count
-  });
+  res.json(deleted[0]);
 });
 
 // SEARCH
 app.get("/api/search", (req, res) => {
-
   const q = (req.query.q || "").toLowerCase();
 
   const results = structures.filter(s =>
@@ -194,11 +134,7 @@ app.get("/api/search", (req, res) => {
     (s.category || "").toLowerCase().includes(q)
   );
 
-  res.json({
-    query: q,
-    count: results.length,
-    results
-  });
+  res.json(results);
 });
 
 // 404
@@ -206,15 +142,7 @@ app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
-// START SERVER
+// START
 app.listen(PORT, () => {
-  console.log("================================");
-  console.log("🚀 StuffOne Backend RUNNING");
-  console.log("================================");
-  console.log("GET    /api/structures");
-  console.log("POST   /upload (API KEY)");
-  console.log("PUT    /api/structures/:id");
-  console.log("DELETE /api/structures/:id");
-  console.log("GET    /api/search?q=");
-  console.log("================================");
+  console.log("🚀 Backend running on port", PORT);
 });
