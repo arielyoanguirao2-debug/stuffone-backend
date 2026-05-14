@@ -23,9 +23,9 @@ const DB_FILE = "./db.json";
 // =====================
 function loadDB() {
   try {
-    return JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
+    const data = fs.readFileSync(DB_FILE, "utf-8");
+    return JSON.parse(data);
   } catch (err) {
-    console.log("⚠️ DB vide ou corrompue, reset automatique");
     return [];
   }
 }
@@ -34,14 +34,10 @@ function loadDB() {
 // SAVE DB
 // =====================
 function saveDB(data) {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-  } catch (err) {
-    console.error("❌ Erreur save DB:", err);
-  }
+  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-// memory cache
+// memory
 let structures = loadDB();
 
 // =====================
@@ -51,14 +47,8 @@ function generateId() {
   return `id-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
 
-function validate(data) {
-  if (!data.title || typeof data.title !== "string") return "title invalide";
-  if (!data.html || typeof data.html !== "string") return "html invalide";
-  return null;
-}
-
 // =====================
-// API KEY MIDDLEWARE
+// API KEY (UPLOAD ONLY)
 // =====================
 function checkApiKey(req, res, next) {
   const key = req.headers["x-api-key"];
@@ -76,7 +66,7 @@ function checkApiKey(req, res, next) {
 
 // HEALTH CHECK
 app.get("/", (req, res) => {
-  res.send("🚀 Backend JSON OK - StuffOne");
+  res.send("🚀 Backend OK - StuffOne JSON");
 });
 
 // GET ALL
@@ -89,33 +79,35 @@ app.get("/api/structures/:id", (req, res) => {
   const item = structures.find(s => s.id === req.params.id);
 
   if (!item) {
-    return res.status(404).json({ error: "Introuvable" });
+    return res.status(404).json({ error: "Not found" });
   }
 
   res.json(item);
 });
 
-// CREATE (BOT)
+// CREATE (BOT UPLOAD)
 app.post("/upload", checkApiKey, (req, res) => {
 
-  const error = validate(req.body);
-  if (error) return res.status(400).json({ error });
+  const { title, category, html, css, url, hash } = req.body;
 
-  const { title, category, html, css, url, hash, depth } = req.body;
+  if (!title || !html) {
+    return res.status(400).json({ error: "Invalid data" });
+  }
 
   // anti duplicate
   if (hash) {
     const exists = structures.find(s => s.hash === hash);
+
     if (exists) {
       return res.json({
-        message: "Déjà existant",
+        message: "Already exists",
         duplicate: true,
         id: exists.id
       });
     }
   }
 
-  const newStructure = {
+  const newItem = {
     id: generateId(),
     title,
     category: category || "unknown",
@@ -123,19 +115,17 @@ app.post("/upload", checkApiKey, (req, res) => {
     css: css || "",
     url: url || "",
     hash: hash || "",
-    depth: depth || 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    createdAt: new Date().toISOString()
   };
 
-  structures.unshift(newStructure);
+  structures.unshift(newItem);
   saveDB(structures);
 
-  console.log(`[UPLOAD] ${title}`);
+  console.log("[UPLOAD]", title);
 
   res.status(201).json({
-    message: "Structure ajoutée",
-    data: newStructure
+    message: "Saved",
+    data: newItem
   });
 });
 
@@ -145,19 +135,18 @@ app.put("/api/structures/:id", (req, res) => {
   const index = structures.findIndex(s => s.id === req.params.id);
 
   if (index === -1) {
-    return res.status(404).json({ error: "Introuvable" });
+    return res.status(404).json({ error: "Not found" });
   }
 
   structures[index] = {
     ...structures[index],
-    ...req.body,
-    updatedAt: new Date().toISOString()
+    ...req.body
   };
 
   saveDB(structures);
 
   res.json({
-    message: "Mis à jour",
+    message: "Updated",
     data: structures[index]
   });
 });
@@ -168,14 +157,15 @@ app.delete("/api/structures/:id", (req, res) => {
   const index = structures.findIndex(s => s.id === req.params.id);
 
   if (index === -1) {
-    return res.status(404).json({ error: "Introuvable" });
+    return res.status(404).json({ error: "Not found" });
   }
 
   const deleted = structures.splice(index, 1);
+
   saveDB(structures);
 
   res.json({
-    message: "Supprimé",
+    message: "Deleted",
     data: deleted[0]
   });
 });
@@ -185,10 +175,11 @@ app.delete("/api/admin/reset", (req, res) => {
 
   const count = structures.length;
   structures = [];
+
   saveDB(structures);
 
   res.json({
-    message: "RESET OK",
+    message: "Reset done",
     deletedCount: count
   });
 });
@@ -199,8 +190,8 @@ app.get("/api/search", (req, res) => {
   const q = (req.query.q || "").toLowerCase();
 
   const results = structures.filter(s =>
-    s.title.toLowerCase().includes(q) ||
-    s.category.toLowerCase().includes(q)
+    (s.title || "").toLowerCase().includes(q) ||
+    (s.category || "").toLowerCase().includes(q)
   );
 
   res.json({
@@ -210,19 +201,15 @@ app.get("/api/search", (req, res) => {
   });
 });
 
-// =====================
 // 404
-// =====================
 app.use((req, res) => {
-  res.status(404).json({ error: "Route non trouvée" });
+  res.status(404).json({ error: "Route not found" });
 });
 
-// =====================
 // START SERVER
-// =====================
 app.listen(PORT, () => {
   console.log("================================");
-  console.log("🚀 StuffOne Backend JSON LIVE");
+  console.log("🚀 StuffOne Backend RUNNING");
   console.log("================================");
   console.log("GET    /api/structures");
   console.log("POST   /upload (API KEY)");
