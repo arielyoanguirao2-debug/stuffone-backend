@@ -42,9 +42,6 @@ function normalizeString(str) {
   return (str || "").toString().toLowerCase();
 }
 
-// =====================
-// VALIDATION
-// =====================
 function validateStructure(data) {
   if (!data.title || typeof data.title !== "string") {
     return "title invalide";
@@ -66,12 +63,16 @@ app.get("/", (req, res) => {
   res.status(200).send("🚀 StuffOne Backend API OK");
 });
 
-// GET ALL
+// =====================
+// GET ALL STRUCTURES
+// =====================
 app.get("/api/structures", (req, res) => {
   res.json(structures);
 });
 
-// GET BY ID
+// =====================
+// GET ONE STRUCTURE
+// =====================
 app.get("/api/structures/:id", (req, res) => {
   const item = structures.find(s => s.id === req.params.id);
 
@@ -82,7 +83,9 @@ app.get("/api/structures/:id", (req, res) => {
   res.json(item);
 });
 
-// CREATE (BOT UPLOAD)
+// =====================
+// CREATE (UPLOAD BOT)
+// =====================
 app.post("/upload", (req, res) => {
 
   const error = validateStructure(req.body);
@@ -90,19 +93,9 @@ app.post("/upload", (req, res) => {
     return res.status(400).json({ error });
   }
 
-  const {
-    title,
-    category,
-    html,
-    css,
-    url,
-    hash,
-    depth
-  } = req.body;
+  const { title, category, html, css, url, hash, depth } = req.body;
 
-  // =====================
   // DEDUPLICATION
-  // =====================
   if (hash) {
     const exists = structures.find(s => s.hash === hash);
 
@@ -138,7 +131,9 @@ app.post("/upload", (req, res) => {
   });
 });
 
-// UPDATE
+// =====================
+// UPDATE STRUCTURE
+// =====================
 app.put("/api/structures/:id", (req, res) => {
 
   const index = findIndexById(req.params.id);
@@ -159,7 +154,9 @@ app.put("/api/structures/:id", (req, res) => {
   });
 });
 
+// =====================
 // DELETE ONE
+// =====================
 app.delete("/api/structures/:id", (req, res) => {
 
   const index = findIndexById(req.params.id);
@@ -176,11 +173,12 @@ app.delete("/api/structures/:id", (req, res) => {
   });
 });
 
-// DELETE ALL (SAFE RESET)
+// =====================
+// DELETE ALL
+// =====================
 app.delete("/api/structures", (req, res) => {
 
   const count = structures.length;
-
   structures = [];
 
   res.json({
@@ -189,11 +187,12 @@ app.delete("/api/structures", (req, res) => {
   });
 });
 
-// ADMIN RESET (FULL CLEAN + LOGIC BACKUP)
+// =====================
+// ADMIN RESET
+// =====================
 app.delete("/api/admin/reset", (req, res) => {
 
   const backup = [...structures];
-
   structures = [];
 
   res.json({
@@ -202,7 +201,9 @@ app.delete("/api/admin/reset", (req, res) => {
   });
 });
 
+// =====================
 // SEARCH
+// =====================
 app.get("/api/search", (req, res) => {
 
   const q = normalizeString(req.query.q);
