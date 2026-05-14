@@ -1,160 +1,233 @@
-
 const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 
 const app = express();
 
-// Configuration
+// =====================
+// CONFIG
+// =====================
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.STUFFONE_API_KEY;
 
-// Fichier de base de données JSON
+// =====================
+// DB FILE
+// =====================
 const DB_FILE = "./db.json";
 
-// Charger les données depuis le fichier
+// =====================
+// LOAD DB
+// =====================
 function loadDB() {
-    try {
-        const data = fs.readFileSync(DB_FILE, "utf-8");
-        return JSON.parse(data);
-    } catch (err) {
-        console.error("Erreur de chargement de la DB :", err);
-        return [];
-    }
+  try {
+    return JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
+  } catch (err) {
+    console.log("⚠️ DB vide ou corrompue, reset automatique");
+    return [];
+  }
 }
 
-// Sauvegarder les données dans le fichier
+// =====================
+// SAVE DB
+// =====================
 function saveDB(data) {
-    try {
-        fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-    } catch (err) {
-        console.error("Erreur de sauvegarde de la DB :", err);
-    }
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error("❌ Erreur save DB:", err);
+  }
 }
 
-// Charger les données en mémoire
+// memory cache
 let structures = loadDB();
 
-// Générateur d'ID unique
+// =====================
+// UTILS
+// =====================
 function generateId() {
-    return `id-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  return `id-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
 
-// Middleware pour vérifier la clé API
-function checkApiKey(req, res, next) {
-    const key = req.headers["x-api-key"];
-    if (!key || key !== API_KEY) {
-        return res.status(401).json({ error: "Unauthorized" });
-    }
-    next();
-}
-
-// Validation des données pour un nouvel upload
 function validate(data) {
-    if (!data.title || typeof data.title !== "string") return "title invalide";
-    if (!data.html || typeof data.html !== "string") return "html invalide";
-    return null;
+  if (!data.title || typeof data.title !== "string") return "title invalide";
+  if (!data.html || typeof data.html !== "string") return "html invalide";
+  return null;
 }
 
-// Routes
+// =====================
+// API KEY MIDDLEWARE
+// =====================
+function checkApiKey(req, res, next) {
+  const key = req.headers["x-api-key"];
 
-// Vérifier que le serveur est en ligne
+  if (!key || key !== API_KEY) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  next();
+}
+
+// =====================
+// ROUTES
+// =====================
+
+// HEALTH CHECK
 app.get("/", (req, res) => {
-    res.send("🚀 StuffOne JSON Backend opérationnel");
+  res.send("🚀 Backend JSON OK - StuffOne");
 });
 
-// Récupérer toutes les structures
+// GET ALL
 app.get("/api/structures", (req, res) => {
-    res.json(structures);
+  res.json(structures);
 });
 
-// Récupérer une structure par ID
+// GET ONE
 app.get("/api/structures/:id", (req, res) => {
-    const item = structures.find(s => s.id === req.params.id);
-    if (!item) {
-        return res.status(404).json({ error: "Introuvable" });
-    }
-    res.json(item);
+  const item = structures.find(s => s.id === req.params.id);
+
+  if (!item) {
+    return res.status(404).json({ error: "Introuvable" });
+  }
+
+  res.json(item);
 });
 
-// Créer une nouvelle structure (via le bot)
+// CREATE (BOT)
 app.post("/upload", checkApiKey, (req, res) => {
-    const error = validate(req.body);
-    if (error) return res.status(400).json({ error });
 
-    const { title, category, html, css, url, hash, depth } = req.body;
+  const error = validate(req.body);
+  if (error) return res.status(400).json({ error });
 
-    // Vérifier les doublons via le hash
-    if (hash) {
-        const exists = structures.find(s => s.hash === hash);
-        if (exists) {
-            return res.json({
-                message: "Déjà existant",
-                duplicate: true,
-                id: exists.id
-            });
-        }
+  const { title, category, html, css, url, hash, depth } = req.body;
+
+  // anti duplicate
+  if (hash) {
+    const exists = structures.find(s => s.hash === hash);
+    if (exists) {
+      return res.json({
+        message: "Déjà existant",
+        duplicate: true,
+        id: exists.id
+      });
     }
+  }
 
-    const newStructure = {
-        id: `id-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        title,
-        category: category || "unknown",
-        html,
-        css: css || "",
-        url: url || "",
-        hash: hash || "",
-        depth: depth || 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-    };
+  const newStructure = {
+    id: generateId(),
+    title,
+    category: category || "unknown",
+    html,
+    css: css || "",
+    url: url || "",
+    hash: hash || "",
+    depth: depth || 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
 
-    structures.unshift(newStructure);
-    saveDB(structures);
+  structures.unshift(newStructure);
+  saveDB(structures);
 
-    console.log(`[UPLOAD] ${title}`);
+  console.log(`[UPLOAD] ${title}`);
 
-    res.status(201).json({
-        message: "Structure ajoutée",
-        data: newStructure
-    });
+  res.status(201).json({
+    message: "Structure ajoutée",
+    data: newStructure
+  });
 });
 
-// Mettre à jour une structure
+// UPDATE
 app.put("/api/structures/:id", (req, res) => {
-    const index = structures.findIndex(s => s.id === req.params.id);
 
-    if (index === -1) {
-        return res.status(404).json({ error: "Introuvable" });
-    }
+  const index = structures.findIndex(s => s.id === req.params.id);
 
-    structures[index] = {
-        ...structures[index],
-        ...req.body,
-        updatedAt: new Date().toISOString()
-    };
+  if (index === -1) {
+    return res.status(404).json({ error: "Introuvable" });
+  }
 
-    saveDB(structures);
+  structures[index] = {
+    ...structures[index],
+    ...req.body,
+    updatedAt: new Date().toISOString()
+  };
 
-    res.json({
-        message: "Mis à jour",
-        data: structures[index]
-    });
+  saveDB(structures);
+
+  res.json({
+    message: "Mis à jour",
+    data: structures[index]
+  });
 });
 
-// Supprimer une structure
+// DELETE ONE
 app.delete("/api/structures/:id", (req, res) => {
-    const index = structures.findIndex(s => s.id === req.params.id);
 
-    if (index === -1) {
-        return res.status(404).json({ error: "Introuvable" });
-    }
+  const index = structures.findIndex(s => s.id === req.params.id);
 
-    const deleted = structures.splice(index, 1);
-    saveDB(structures);
+  if (index === -1) {
+    return res.status(404).json({ error: "Introuvable" });
+  }
 
-    res.json({
-        message:
+  const deleted = structures.splice(index, 1);
+  saveDB(structures);
+
+  res.json({
+    message: "Supprimé",
+    data: deleted[0]
+  });
+});
+
+// RESET ALL
+app.delete("/api/admin/reset", (req, res) => {
+
+  const count = structures.length;
+  structures = [];
+  saveDB(structures);
+
+  res.json({
+    message: "RESET OK",
+    deletedCount: count
+  });
+});
+
+// SEARCH
+app.get("/api/search", (req, res) => {
+
+  const q = (req.query.q || "").toLowerCase();
+
+  const results = structures.filter(s =>
+    s.title.toLowerCase().includes(q) ||
+    s.category.toLowerCase().includes(q)
+  );
+
+  res.json({
+    query: q,
+    count: results.length,
+    results
+  });
+});
+
+// =====================
+// 404
+// =====================
+app.use((req, res) => {
+  res.status(404).json({ error: "Route non trouvée" });
+});
+
+// =====================
+// START SERVER
+// =====================
+app.listen(PORT, () => {
+  console.log("================================");
+  console.log("🚀 StuffOne Backend JSON LIVE");
+  console.log("================================");
+  console.log("GET    /api/structures");
+  console.log("POST   /upload (API KEY)");
+  console.log("PUT    /api/structures/:id");
+  console.log("DELETE /api/structures/:id");
+  console.log("GET    /api/search?q=");
+  console.log("================================");
+});
