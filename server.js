@@ -180,3 +180,14 @@ app.listen(PORT, () => {
   console.log("➡ GET    /api/search?q=");
   console.log("----------------------------------");
 });
+app.delete("/clear", (req, res) => {
+
+    structures = [];
+
+    res.json({
+
+        message: "Toutes les structures ont été supprimées"
+
+    });
+
+});
